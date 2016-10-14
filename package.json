@@ -1,7 +1,7 @@
 {
   "name": "tsconfig-compileonsave",
   "displayName": "tsconfig: compileOnSave ",
-  "description": "Integrated Compilation of TypeScript projects",
+  "description": "Integrated and seamless compilation of TypeScript projects",
   "version": "0.0.1",
   "publisher": "Evgenij Beloded",
   "engines": {
