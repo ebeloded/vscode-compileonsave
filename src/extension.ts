@@ -14,13 +14,17 @@ console.log('loading extension');
 
 const configureOutputChannel = () => {
     console.log('create output channel')
-    outputChannel = vscode.window.createOutputChannel('TypeScript Compiler')
+    if (!outputChannel)
+        outputChannel = vscode.window.createOutputChannel('TypeScript Compiler')
 }
 
 const disposeOutputChannel = () => {
     console.log('dispose output channel');
-    if (outputChannel)
+    if (outputChannel) {
         outputChannel.dispose();
+        outputChannel = null;
+    }
+
 }
 let cleanupChannelOnNextRound = false;
 
@@ -47,7 +51,13 @@ const launchTSC = (tsconfigPath) => {
 
     tsc.stdout.on('data', (data) => updateOutputChannel(`${data}`));
 
-    tsc.on('close', (code, signal) => delete tscProcesses[tsc.pid]);
+    tsc.on('close', (code, signal) => {
+        delete tscProcesses[tsc.pid]
+        console.log('close process');
+        if (Object.keys(tscProcesses).length === 0) {
+            disposeOutputChannel();
+        }
+    });
 
     tsc.on('error', (err) => console.error('tsc error:', err))
 
@@ -65,18 +75,22 @@ const stopAllTSC = () => Object.keys(tscProcesses).forEach(key => stopTSC(key))
 
 const processTsConfig = tsconfigPath => {
     console.log('process tsconfig', tsconfigPath);
-    stopTSC(tsconfigPath);
     try {
         const data = fs.readFileSync(tsconfigPath, 'utf8');
         console.log('data', data);
         const tsconfig = JSON.parse(stripJSONComments(data));
         console.log('tsconfig:', tsconfig);
         if (tsconfig.compileOnSave === true) {
-            launchTSC(tsconfigPath)
-            return;
+            if (!tscProcesses[tsconfigPath]) {
+                launchTSC(tsconfigPath)
+                configureOutputChannel();
+            }
+        } else {
+            stopTSC(tsconfigPath)
         }
     } catch (e) {
         console.log('catch', e);
+        stopTSC(tsconfigPath);
     }
 
 }
@@ -102,7 +116,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     console.log('activate compileOnSave extension')
     if (vscode.workspace.rootPath) {
-        configureOutputChannel();
         vscode.workspace.findFiles('**/tsconfig.json', '**/node_modules/**').then((files) => {
             files.forEach(({fsPath}) => {
                 processTsConfig(fsPath);
