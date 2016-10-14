@@ -2,28 +2,106 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs'
+import { spawn, exec, execFile } from 'child_process'
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+const kill = require('tree-kill');
 
-    // Use the console to output diagnostic information (console.log) and errors (console.error)
-    // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "compileonsave" is now active!');
+const tscProcesses = {};
+let watcher, outputChannel;
 
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with  registerCommand
-    // The commandId parameter must match the command field in package.json
-    let disposable = vscode.commands.registerCommand('extension.sayHello', () => {
-        // The code you place here will be executed every time your command is executed
-
-        // Display a message box to the user
-        vscode.window.showInformationMessage('Hello World!');
-    });
-
-    context.subscriptions.push(disposable);
+const configureOutputChannel = () => {
+    outputChannel = vscode.window.createOutputChannel('TypeScript Compiler')
 }
 
-// this method is called when your extension is deactivated
+const disposeOutputChannel = () => {
+    if (outputChannel)
+        outputChannel.dispose();
+}
+let cleanupChannelOnNextRound = false;
+
+const updateOutputChannel = (data) => {
+    if (cleanupChannelOnNextRound) {
+        outputChannel.clear();
+        cleanupChannelOnNextRound = false;
+    }
+    var dataString = `${data}`;
+
+    if (dataString.indexOf('error') > -1) {
+        outputChannel.append(dataString);
+    } else {
+        cleanupChannelOnNextRound = true;
+    }
+}
+
+const launchTSC = (tsconfigPath) => {
+
+    const tsc = spawn('tsc', ['-p', `"${tsconfigPath}"`, '-w'], { shell: true });
+
+    tsc.stdout.on('data', (data) => updateOutputChannel(`${data}`));
+
+    tsc.on('close', (code, signal) => delete tscProcesses[tsc.pid]);
+
+    tscProcesses[tsconfigPath] = tsc.pid;
+}
+
+const stopTSC = (tsconfigPath) => {
+    if (tscProcesses[tsconfigPath]) {
+        kill(tscProcesses[tsconfigPath]);
+    }
+}
+
+const stopAllTSC = () => Object.keys(tscProcesses).forEach(key => stopTSC(key))
+
+const processTsConfig = tsconfigPath => {
+    stopTSC(tsconfigPath);
+    try {
+        const data = fs.readFileSync(tsconfigPath, 'utf8');
+        const tsconfig = JSON.parse(data);
+        if (tsconfig.compileOnSave === true) {
+            launchTSC(tsconfigPath)
+            return;
+        }
+    } catch (e) { }
+
+}
+
+
+const createWatcher = () => {
+
+    watcher = vscode.workspace.createFileSystemWatcher('**/tsconfig.json')
+
+    const processChange = ({fsPath}) => processTsConfig(fsPath)
+
+    watcher.onDidChange(processChange);
+    watcher.onDidCreate(processChange);
+    watcher.onDidDelete(processChange);
+}
+
+const disposeWatcher = () => {
+    if (watcher && watcher.dispose)
+        watcher.dispose();
+}
+
+export function activate(context: vscode.ExtensionContext) {
+
+    if (vscode.workspace.rootPath) {
+        configureOutputChannel();
+        vscode.workspace.findFiles('**/tsconfig.json', '**/node_modules/**').then((files) => {
+            files.forEach(({fsPath}) => {
+                processTsConfig(fsPath);
+            })
+        })
+        createWatcher();
+
+    } else {
+        //'no root path: no need to activate the extension'
+    }
+
+}
+
 export function deactivate() {
+    stopAllTSC();
+    disposeWatcher();
+    disposeOutputChannel();
 }
