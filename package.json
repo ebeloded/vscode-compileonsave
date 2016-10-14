@@ -27,6 +27,7 @@
     "@types/mocha": "^2.2.32"
   },
   "dependencies": {
+    "strip-json-comments": "^2.0.1",
     "tree-kill": "^1.1.0"
   }
 }
